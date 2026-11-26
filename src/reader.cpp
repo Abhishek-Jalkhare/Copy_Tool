@@ -8,17 +8,16 @@
 #include <mutex>
 #include <queue>
 #include <string>
+#include <boost/program_options/detail/cmdline.hpp>
 
-namespace std
-{
-    class mutex;
-    class condition_variable;
-}
+#include "../Copy_Tool.h"
 
-void read(const std::string& srcPath, std::queue<std::vector<char>>& buffer,
-          std::mutex& mtx  , std::condition_variable& not_empty, std::condition_variable& not_full,
-          bool& done_reading ,const std::atomic<bool>& stop_read , const std::streamsize chunkSize , const size_t max_queue_size )
+
+void read(Params& obj)
 {
+    auto& [srcPath , rbuffer,fbuffer ,
+        mtx , not_empty ,not_full ,
+        done_reading , stop_read ] = obj;
     struct Guard
     {
         std::mutex& mtx;
@@ -34,7 +33,9 @@ void read(const std::string& srcPath, std::queue<std::vector<char>>& buffer,
         }
 
     } guard(mtx, not_empty, done_reading);
-    std::ifstream src(srcPath , std::ios::binary);
+    std::ifstream src;
+    src.rdbuf()->pubsetbuf(nullptr, 0);   // unbuffered; must be called BEFORE open()
+    src.open(srcPath, std::ios::binary);
     if (!src.is_open())
     {
         throw std::runtime_error("Unable to open file for reading");
@@ -43,25 +44,25 @@ void read(const std::string& srcPath, std::queue<std::vector<char>>& buffer,
     // A struct that acts as a guard whenever the function throws it sets done to true then exits
 
 
-
     while (src && !stop_read)
     {
-        std::vector<char> chunk(chunkSize);
-        src.read(chunk.data(), chunkSize);
-        const std::streamsize bytesRead = src.gcount();
-        if (bytesRead <= 0 ) break;
-        if (bytesRead != chunkSize)
-        {
-            chunk.resize(bytesRead);
-        }
+        Chunk chunk;
         {
             std::unique_lock<std::mutex> lock(mtx);
             not_full.wait(lock, [&]()
             {
-                return buffer.size() < max_queue_size || stop_read;
+                return  !fbuffer.empty() || stop_read;
             });
             if (stop_read) break;
-            buffer.push(std::move(chunk));
+            chunk = std::move(fbuffer.front());
+            fbuffer.pop();
+        }
+        src.read(chunk.data.data(), chunk.data.size());
+        chunk.size = src.gcount();
+        if (chunk.size <= 0 ) break;
+        {
+            std::lock_guard lock(mtx);
+            rbuffer.push(std::move(chunk));
         }
         not_empty.notify_one();
     }

@@ -7,5 +7,11 @@ find_package(Boost REQUIRED COMPONENTS program_options)
 
 add_executable(Copy_Tool main.cpp
         src/reader.cpp
-        src/writer.cpp)
+        src/writer.cpp
+        Copy_Tool.h
+        src/parser.cpp
+        src/validator.cpp
+        src/copy_file.cpp
+)
+add_executable(Benchmark benchmark.cpp)
 target_link_libraries(Copy_Tool PRIVATE Boost::program_options)
